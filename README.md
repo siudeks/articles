@@ -1,11 +1,12 @@
+
 # Memory leak with popular Stream.toList()
 
-Strumienie wrzawie są bardzo popularną metodą obróbki danych szczególnie że obiecują udostępniać coraz więcej metod pozwalających operować na zestawach dany sposób przewidywalny i na bez ale to są one całkowicie bezpieczne w niniejszym przykładzie pokażemy że zamykano z zasobów produkowanej przez strumienie jest subtelną różnicą którą ciężko wychwycić w programie stanu na którą trzeba zwrócić uwagę aby nie tracić zasobów
+Streams are a very popular method of data processing, especially since they promise to provide more and more methods that allow you to operate on sets in a predictable way. However, are they completely safe? In this example, we will show that closing resources produced by streams is a subtle difference that is hard to catch in a program, and you need to pay attention to it to avoid losing resources.
 
-Dowód pierwszy: test na otwieranie zamykanie plików nie traci zasobów
+First proof: a test for opening and closing files does not lose resources.
 
-Dowód drugi: test na otwieranie plików powoduje utraty zasobów jeżeli ich nie zamykamy
+Second proof: a test for opening files causes resource loss if we do not close them.
 
-Dowód trzeci używanie strumieni w oparciu o pliki sposób podobny do używania strumienia partych o pamięć prowadzi do wycieku plików
+Third proof: using streams based on files in a way similar to using memory-based streams leads to file leaks.
 
-Wnioski propozycje na przyszłość
+Conclusions and suggestions for the future.
