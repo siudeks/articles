@@ -32,7 +32,111 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.0.0</version>
+				<configuration>
+					<argLine>
+						-Xmx256m
+						-XX:MaxDirectMemorySize=64m
+						-XX:MaxMetaspaceSize=128m
+						-XX:CompressedClassSpaceSize=32m
+						-XX:ReservedCodeCacheSize=32m
+						-Djava.net.preferIPv4Stack=true
+						-Dfile.encoding=UTF-8
+						-Djunit.jupiter.execution.timeout.default=30s
+					</argLine>
+					<systemPropertyVariables>
+						<java.awt.headless>true</java.awt.headless>
+						<spring.profiles.active>test</spring.profiles.active>
+					</systemPropertyVariables>
+					<includes>
+						<include>**/*Test.java</include>
+						<include>**/*Tests.java</include>
+					</includes>
+					<environmentVariables>
+						<MAVEN_OPTS>-Xmx256m</MAVEN_OPTS>
+					</environmentVariables>
+				</configuration>
+				<executions>
+					<execution>
+						<id>resource-exhaustion-tests</id>
+						<phase>test</phase>
+						<goals>
+							<goal>test</goal>
+						</goals>
+						<configuration>
+							<includes>
+								<include>**/ResourceExhaustionTests.java</include>
+							</includes>
+							<argLine>
+								-Xmx128m
+								-XX:MaxDirectMemorySize=32m
+								-XX:MaxMetaspaceSize=64m
+								-XX:CompressedClassSpaceSize=16m
+								-XX:ReservedCodeCacheSize=16m
+								-XX:MaxRAMPercentage=25.0
+								-XX:+UseSerialGC
+								-XX:NewRatio=1
+								-XX:SurvivorRatio=2
+								-Djava.net.preferIPv4Stack=true
+								-Dfile.encoding=UTF-8
+								-Djunit.jupiter.execution.timeout.default=30s
+								-Djava.nio.channels.DefaultThreadPool.threadFactory=limited
+								-Djava.util.concurrent.ForkJoinPool.common.parallelism=2
+								-Dsun.nio.ch.bugLevel=0
+							</argLine>
+							<systemPropertyVariables>
+								<java.awt.headless>true</java.awt.headless>
+								<spring.profiles.active>test</spring.profiles.active>
+								<java.net.useSystemProxies>false</java.net.useSystemProxies>
+								<networkaddress.cache.ttl>0</networkaddress.cache.ttl>
+								<networkaddress.cache.negative.ttl>0</networkaddress.cache.negative.ttl>
+							</systemPropertyVariables>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<profile>
+			<id>resource-limited</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.codehaus.mojo</groupId>
+						<artifactId>exec-maven-plugin</artifactId>
+						<version>3.1.0</version>
+						<executions>
+							<execution>
+								<id>run-resource-exhaustion-test</id>
+								<phase>test</phase>
+								<goals>
+									<goal>exec</goal>
+								</goals>
+								<configuration>
+									<executable>bash</executable>
+									<arguments>
+										<argument>-c</argument>
+										<argument>
+											ulimit -n 512 &amp;&amp; 
+											ulimit -u 256 &amp;&amp; 
+											echo "File descriptor limit: $(ulimit -n)" &amp;&amp; 
+											echo "Process limit: $(ulimit -u)" &amp;&amp; 
+											mvn surefire:test -Dtest=ResourceExhaustionTests -Dmaven.test.failure.ignore=false
+										</argument>
+									</arguments>
+									<workingDirectory>${project.basedir}</workingDirectory>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 
 </project>
