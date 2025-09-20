@@ -2,6 +2,10 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
+      version = "=4.45.0"
+    }
+    random = {
+      source  = "hashicorp/random"
       version = "~>3.0"
     }
   }
@@ -9,7 +13,15 @@ terraform {
 }
 
 provider "azurerm" {
-  features {}
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
+}
+
+resource "azurerm_resource_provider_registration" "app" {
+  name = "Microsoft.App"
 }
 
 # Variables
@@ -22,107 +34,81 @@ variable "location" {
 variable "resource_group_name" {
   description = "Resource group name"
   type        = string
-  default     = "rg-spring-scale-to-zero"
+  default     = "rg-container-app-demo"
 }
 
 variable "app_name" {
   description = "Application name"
   type        = string
-  default     = "spring-scale-demo"
+  default     = "demo-app"
 }
 
 variable "container_image" {
   description = "Container image to deploy"
   type        = string
-  default     = "your-registry.azurecr.io/spring-demo:latest"
+  default     = "nginx:alpine" # Simple default for demo purposes
+}
+
+# Random suffix for unique naming - human friendly
+resource "random_pet" "suffix" {
+  length = 2
+  separator = "-"
 }
 
 # Resource Group
 resource "azurerm_resource_group" "main" {
-  name     = var.resource_group_name
+  name     = "${var.resource_group_name}-${random_pet.suffix.id}"
   location = var.location
 
+  
   tags = {
     Environment = "demo"
-    Project     = "spring-scale-to-zero"
+    Project     = "container-app-scale-to-zero"
   }
 }
 
 # Container Registry
 resource "azurerm_container_registry" "main" {
-  name                = "${replace(var.app_name, "-", "")}acr"
+  name                = "${replace(var.app_name, "-", "")}acr${replace(random_pet.suffix.id, "-", "")}"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   sku                 = "Basic"
-  admin_enabled       = true
-
-  tags = azurerm_resource_group.main.tags
-}
-
-# Log Analytics Workspace
-resource "azurerm_log_analytics_workspace" "main" {
-  name                = "${var.app_name}-logs"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  sku                 = "PerGB2018"
-  retention_in_days   = 30
-
-  tags = azurerm_resource_group.main.tags
-}
-
-# Application Insights
-resource "azurerm_application_insights" "main" {
-  name                = "${var.app_name}-insights"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
-  workspace_id        = azurerm_log_analytics_workspace.main.id
-  application_type    = "web"
-
-  tags = azurerm_resource_group.main.tags
-}
-
-# App Service Plan with consumption-based pricing
-resource "azurerm_service_plan" "main" {
-  name                = "${var.app_name}-plan"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  os_type             = "Linux"
-  sku_name            = "P1v3" # Premium V3 required for scale to zero
+  admin_enabled       = false
 
   tags = azurerm_resource_group.main.tags
 }
 
 # Container App Environment
 resource "azurerm_container_app_environment" "main" {
-  name                       = "${var.app_name}-env"
+  name                       = "${var.app_name}-env-${random_pet.suffix.id}"
   location                   = azurerm_resource_group.main.location
   resource_group_name        = azurerm_resource_group.main.name
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
 
   tags = azurerm_resource_group.main.tags
+
+  depends_on = [
+  azurerm_resource_provider_registration.app
+]
 }
 
 # Container App (supports scale to zero)
+# Note: Azure Container Apps has a minimum scale-down cooldown of ~60 seconds
+# The 10-second cooldown is not supported by the platform
 resource "azurerm_container_app" "main" {
-  name                         = var.app_name
+  name                         = "${var.app_name}-${random_pet.suffix.id}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
 
   template {
-    min_replicas = 0  # Scale to zero
-    max_replicas = 5
+    min_replicas = 0  # Scale to zero (fastest possible scale-down)
+    max_replicas = 1
 
     container {
       name   = "spring-app"
       image  = var.container_image
       cpu    = 0.5
       memory = "1Gi"
-
-      env {
-        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
-        value = azurerm_application_insights.main.connection_string
-      }
 
       env {
         name  = "SPRING_PROFILES_ACTIVE"
@@ -133,7 +119,7 @@ resource "azurerm_container_app" "main" {
 
   ingress {
     external_enabled = true
-    target_port      = 8080
+    target_port      = 80
     traffic_weight {
       percentage      = 100
       latest_revision = true
@@ -143,51 +129,15 @@ resource "azurerm_container_app" "main" {
   tags = azurerm_resource_group.main.tags
 }
 
-# Alternative: App Service with Linux container (does not scale to zero)
-resource "azurerm_linux_web_app" "alternative" {
-  name                = "${var.app_name}-webapp"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_service_plan.main.location
-  service_plan_id     = azurerm_service_plan.main.id
 
-  site_config {
-    always_on = false # Required for scale to zero behavior (though not true zero)
-    
-    application_stack {
-      docker_image_name   = var.container_image
-      docker_registry_url = "https://${azurerm_container_registry.main.login_server}"
-    }
-  }
-
-  app_settings = {
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
-    "SPRING_PROFILES_ACTIVE"                = "production"
-    "DOCKER_REGISTRY_SERVER_URL"            = "https://${azurerm_container_registry.main.login_server}"
-    "DOCKER_REGISTRY_SERVER_USERNAME"       = azurerm_container_registry.main.admin_username
-    "DOCKER_REGISTRY_SERVER_PASSWORD"       = azurerm_container_registry.main.admin_password
-  }
-
-  tags = azurerm_resource_group.main.tags
-}
 
 # Outputs
 output "container_app_url" {
-  description = "Container App URL (supports scale to zero)"
+  description = "Container App URL"
   value       = "https://${azurerm_container_app.main.latest_revision_fqdn}"
-}
-
-output "web_app_url" {
-  description = "Web App URL (alternative deployment)"
-  value       = "https://${azurerm_linux_web_app.alternative.default_hostname}"
 }
 
 output "container_registry_login_server" {
   description = "Container Registry login server"
   value       = azurerm_container_registry.main.login_server
-}
-
-output "application_insights_instrumentation_key" {
-  description = "Application Insights instrumentation key"
-  value       = azurerm_application_insights.main.instrumentation_key
-  sensitive   = true
 }
